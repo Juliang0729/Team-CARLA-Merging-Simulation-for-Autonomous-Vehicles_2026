@@ -2,6 +2,17 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# FHWM Co-Simulation outputs
+performance_metrics.csv
+evaluation_outputs/
+
+# Large model/asset files
+yolov5m.pt
+cache/
+
+# VS Code workspace
+*.code-workspace
+
 # C extensions
 *.so
 
@@ -149,3 +160,13 @@ docs/tmp.py
 video_dumping
 *data_dumping*
 ready*
+
+# FHWM Co-Simulation outputs
+performance_metrics.csv
+
+# Large model/asset files
+yolov5m.pt
+cache/
+
+# VS Code workspace
+*.code-workspace

@@ -33,6 +33,13 @@ def arg_parse():
     parser.add_argument('-v', "--version", type=str, default='0.9.11',
                         help='Specify the CARLA simulator version, default'
                              'is 0.9.11, 0.9.12 is also supported.')
+    parser.add_argument("--state_estimator", action='store_true',
+                        help='Enable state estimation with object detection and tracking. '
+                             'Disables birdseye camera visualization. '
+                             'Requires ultralytics YOLO package.')
+    parser.add_argument("--evaluation", action='store_true',
+                        help='Enable performance metrics evaluation during simulation. '
+                             'Logs Simulator Time Offset and other metrics to CSV file.')
     # parse the arguments and return the result
     opt = parser.parse_args()
     return opt
@@ -41,6 +48,13 @@ def arg_parse():
 def main():
     # parse the arguments
     opt = arg_parse()
+    
+    # Automatically enable state_estimator when evaluation is enabled
+    # (position error metrics require state estimation)
+    if opt.evaluation and not opt.state_estimator:
+        opt.state_estimator = True
+        print("[Note] Enabling state_estimator (required for position error metrics)")
+    
     # print the version of OpenCDA
     print("OpenCDA Version: %s" % __version__)
     # set the default yaml file
