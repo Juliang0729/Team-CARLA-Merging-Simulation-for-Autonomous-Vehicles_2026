@@ -68,10 +68,10 @@ def run_scenario(opt, scenario_params):
 
         # ── Merging controller setup ──────────────────────────────────
         merging_params = scenario_params.get('merging_controller', {})
-        model_path = os.path.expanduser(str(merging_params.get(
-            'model_path',
-            '~/onRampMerging/models/GRU-uniform-delay/'
-            'GRU-uniform-delay_best')))
+        _default_model = os.path.join(
+            os.path.dirname(__file__), '..', '..', 'onRampMerging',
+            'models', 'GRU-uniform-delay', 'GRU-uniform-delay_best')
+        model_path = os.path.expanduser(str(merging_params.get('model_path', _default_model)))
         merging_ctrl = MergingController(
             model_path=model_path,
             ego_id=merging_params.get('ego_id', 'ego'),

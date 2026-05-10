@@ -51,7 +51,7 @@ except Exception:
 # ---------------------------------------------------------------------------
 _ONRAMP_ROOT = os.environ.get(
     'ONRAMP_MERGING_ROOT',
-    os.path.expanduser('~/onRampMerging'))
+    os.path.join(os.path.dirname(__file__), '..', '..', 'onRampMerging'))
 if _ONRAMP_ROOT not in sys.path:
     sys.path.insert(0, _ONRAMP_ROOT)
 

@@ -54,16 +54,15 @@ scenario:
   single_cav_list: []
 
 merging_controller:
-  model_path: ~/onRampMerging/models/GRU-uniform-delay/GRU-uniform-delay_best
+  # model_path: /path/to/onRampMerging/models/GRU-uniform-delay/GRU-uniform-delay_best  # defaults to onRampMerging submodule
   ego_id: ego
   radius: 50            
   max_delay: 20         
   delay_mode: uniform   
   use_safety: true      
-  # Edge/lane where a successful merge is detected (PHMD5 network)
+  # Edge/lane where a successful merge is detected (FHWM network)
   merge_edge: "-1"
   merge_min_lane: 1
-  # Optional: YOLO model path for state estimation (if --state_estimator is enabled)
-  yolo_model_path: ~/OpenCDA/yolov5m.pt
+  # yolo_model_path: /path/to/yolov5m.pt  # defaults to yolov5m.pt in OpenCDA root
   # Optional: Performance evaluation log file (if --evaluation is enabled)
   evaluation_log: performance_metrics.csv
