@@ -19,6 +19,7 @@ import torch
 import threading
 import time
 import warnings
+import traci
 from collections import defaultdict
 from opencda.co_simulation.sumo_integration.bridge_helper import BridgeHelper
 
@@ -57,7 +58,7 @@ class StateEstimator:
     Provides object detection, tracking, and visualization.
     """
     
-    def __init__(self, world, ego_vehicle, yolo_model_path=None):
+    def __init__(self, world, ego_vehicle, yolo_model_path=None, ego_id=None):
         """
         Initialize the state estimator.
         
@@ -69,10 +70,13 @@ class StateEstimator:
             The ego vehicle to attach sensors to
         yolo_model_path : str, optional
             Path to YOLO model weights
+        ego_id : str, optional
+            SUMO vehicle ID for ego vehicle (for co-simulation)
         """
         self.world = world
         self.ego_vehicle = ego_vehicle
         self.world_map = world.get_map()
+        self.ego_id = ego_id  # Store SUMO vehicle ID
         
         # Sensor data storage
         self.camera_data = {}  # Dict of camera name -> image data
@@ -334,7 +338,6 @@ class StateEstimator:
         
         # Redraw tracked vehicles with BLUE boxes to distinguish them
         if len(self.tracked_vehicles) > 0:
-            import traci
             ego_transform = self.ego_vehicle.get_transform()
             ego_pos = ego_transform.location
             
@@ -412,9 +415,15 @@ class StateEstimator:
         
         # Add info overlay
         ego_transform = self.ego_vehicle.get_transform()
-        velocity = self.ego_vehicle.get_velocity()
-        speed_ms = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
-        speed_kmh = speed_ms * 3.6
+        
+        # Get velocity from SUMO if available, otherwise fallback to CARLA
+        if self.ego_id and self.ego_id in traci.vehicle.getIDList():
+            speed_ms = traci.vehicle.getSpeed(self.ego_id)
+            speed_kmh = speed_ms * 3.6
+        else:
+            velocity = self.ego_vehicle.get_velocity()
+            speed_ms = np.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
+            speed_kmh = speed_ms * 3.6
         
         info_text = [
             f'Speed: {speed_kmh:.1f} km/h',
@@ -453,8 +462,10 @@ class StateEstimator:
             for c, cam_name in enumerate(row):
                 if cam_name in camera_frames:
                     img = camera_frames[cam_name]
-                    # Add camera label
-                    cv2.putText(img, cam_name, (10, 20),
+                    # Add camera label in top right corner
+                    text_size = cv2.getTextSize(cam_name, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+                    text_x = w - text_size[0] - 10  # 10px padding from right edge
+                    cv2.putText(img, cam_name, (text_x, 20),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
                     mosaic[r*h:(r+1)*h, c*w:(c+1)*w] = img
         
@@ -610,8 +621,6 @@ class StateEstimator:
         list
             List of matched vehicles with position errors
         """
-        import traci
-        
         matched = []
         
         # Get ego position in SUMO coordinates for accurate distance calculation

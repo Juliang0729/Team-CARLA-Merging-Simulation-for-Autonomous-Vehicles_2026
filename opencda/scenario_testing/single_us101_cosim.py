@@ -145,7 +145,8 @@ def run_scenario(opt, scenario_params):
                             # Use state estimator instead of birdseye camera
                             state_estimator = StateEstimator(
                                 scenario_manager.world, ego_actor, 
-                                yolo_model_path=yolo_model_path)
+                                yolo_model_path=yolo_model_path,
+                                ego_id=ego_id_str)
                             if getattr(run_scenario, '_merge_logged', False):
                                 state_estimator.notify_merged_on_mainline()
                             print('[cosim] State estimator attached '
