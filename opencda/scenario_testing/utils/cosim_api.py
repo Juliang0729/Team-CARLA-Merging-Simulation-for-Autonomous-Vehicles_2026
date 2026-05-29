@@ -115,6 +115,41 @@ class CoScenarioManager(ScenarioManager):
         BridgeHelper.blueprint_library = self.world.get_blueprint_library()
         BridgeHelper.offset = self.sumo.get_net_offset()
 
+    def fix_z_coordinate(self, transform):
+        """
+        Fix the z-coordinate by querying the CARLA map for the road elevation.
+        SUMO networks may only have 2D coordinates (z=0), so we need to get
+        the proper elevation from CARLA's map.
+        
+        Parameters
+        ----------
+        transform : carla.Transform
+            Transform with potentially incorrect z-coordinate
+            
+        Returns
+        -------
+        carla.Transform
+            Transform with corrected z-coordinate from map
+        """
+        # Query the map for the waypoint at this x,y location
+        waypoint = self.carla_map.get_waypoint(
+            transform.location,
+            project_to_road=True,
+            lane_type=carla.LaneType.Any
+        )
+        
+        if waypoint is not None:
+            # Use the waypoint's z-coordinate (road elevation)
+            corrected_location = carla.Location(
+                x=transform.location.x,
+                y=transform.location.y,
+                z=waypoint.transform.location.z
+            )
+            return carla.Transform(corrected_location, transform.rotation)
+        else:
+            # If no waypoint found, return original transform
+            return transform
+
     def tick(self):
         """
         Execute a single step of co-simulation. Logic: sumo will move the
@@ -151,6 +186,9 @@ class CoScenarioManager(ScenarioManager):
                 carla_transform = \
                     BridgeHelper.get_carla_transform(sumo_actor.transform,
                                                      sumo_actor.extent)
+                # Fix z-coordinate by querying CARLA map for road elevation
+                carla_transform = self.fix_z_coordinate(carla_transform)
+                
                 carla_actor_id = self.spawn_actor(carla_blueprint,
                                                   carla_transform)
                 if carla_actor_id != INVALID_ACTOR_ID:
@@ -173,6 +211,9 @@ class CoScenarioManager(ScenarioManager):
             carla_transform = \
                 BridgeHelper.get_carla_transform(sumo_actor.transform,
                                                  sumo_actor.extent)
+            # Fix z-coordinate by querying CARLA map for road elevation
+            carla_transform = self.fix_z_coordinate(carla_transform)
+            
             assert self.synchronize_vehicle(carla_actor_id,
                                             carla_transform)
 

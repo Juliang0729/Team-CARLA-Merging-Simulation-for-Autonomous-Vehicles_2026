@@ -371,12 +371,9 @@ class MergingController:
         # Logging state
         self._log_enabled = True
         self._tick_count = 0
-        self._last_lane = None
-        self._lane_change_in_progress = False
-        self._lane_change_target = None
-        self._lane_change_cooldown_ticks = 0
-        self._tick_count = 0
-        self._last_lane = None
+        self._last_lane = 0
+        self._lane_change_cooldown = 0  # Cooldown in ticks before next lane change allowed
+        self._merged_to_lane1 = False  # Once merged to lane 1, stay there
         
         # Reset log file
         if hasattr(self, 'log_file') and self.log_file:
@@ -411,7 +408,13 @@ class MergingController:
             # First tick after ego appears — initialise
             self._active = True
             traci.vehicle.setSpeedMode(self.ego_id, 96)
-            traci.vehicle.setLaneChangeMode(self.ego_id, 0b000000000000)
+            # Disable SUMO's lane-change model - we control it via TraCI changeLane() commands
+            traci.vehicle.setLaneChangeMode(self.ego_id, 0)
+            # Initialize lane tracking
+            try:
+                self._last_lane = traci.vehicle.getLaneIndex(self.ego_id)
+            except Exception:
+                self._last_lane = 0
             raw_obs = _build_observation(
                 self.ego_id, self.radius, self.num_entities)
             self._obs_augmented = self.delay_state.reset(raw_obs)
@@ -500,9 +503,10 @@ class MergingController:
         """
         Physics-based safety controller using **traci.vehicle.getLeader**
         and **getFollower** so it works across edge boundaries.
+        Inspired by onRampMerging/src/safety_controller.py
         """
-        MIN_GAP = 40.0          # meters (increased from 20.0 to prevent SUMO collisions)
-        MAX_DECEL = 5.0         # m/s²
+        MIN_GAP = 5         # meters - minimum safe gap for high-speed following
+        MAX_DECEL = 10.0         # m/s²
         VEH_LENGTH = 5.0        # meters
 
         parsed = parseAction(action)
@@ -512,18 +516,30 @@ class MergingController:
         cur_lane = traci.vehicle.getLaneIndex(self.ego_id)
         edge_id = traci.vehicle.getRoadID(self.ego_id)
 
-        # On junction internals OR mainline edge -2 → no lane change, keep acceleration
-        # Disable RL lane changes on -2 to prevent side collisions
-        if edge_id.startswith(':') or edge_id == '-2':
-            # Still check leader in current lane
+        # Once merged to lane 1, block ALL further lane changes (limit to one merge only)
+        if self._merged_to_lane1:
+            return np.array([action[0], 0.0], dtype=np.float32)
+
+        # On junction internals OR mainline edges -2, -3, -16 → no lane change, keep acceleration
+        # EXCEPT allow merging during clusterJ1_cluster111_J1 and clusterJ2_cluster122_J2 junctions (critical merge points)
+        # Disable RL lane changes on these edges to prevent side collisions
+        is_merge_junction = ':clusterJ1_cluster111_J1' in edge_id or ':clusterJ2_cluster122_J2' in edge_id
+        on_mainline = edge_id in ['-2', '-3', '-16']
+        if (edge_id.startswith(':') and not is_merge_junction) or on_mainline:
+            # Still check leader in current lane, but be less aggressive on mainline after merge
             leader = traci.vehicle.getLeader(self.ego_id, 50.0)
             if leader is not None and leader[0]:
                 gap = leader[1]
                 l_speed = traci.vehicle.getSpeed(leader[0])
                 approach = max(ego_speed - l_speed, 0.0)
                 sdist = (approach ** 2) / (2 * MAX_DECEL) if approach > 0 else 0
-                if gap < sdist + MIN_GAP:
-                    action = np.array([-5.0, 0.0], dtype=np.float32)
+                # On mainline after merge, use relaxed following to avoid emergency braking
+                # (vehicle can't change lanes anyway, so must follow traffic flow)
+                safety_gap = MIN_GAP if not (on_mainline and self._merged_to_lane1) else MIN_GAP * 0.3
+                if gap < sdist + safety_gap:
+                    # Use gentler deceleration on mainline after merge
+                    decel = -5.0 if not (on_mainline and self._merged_to_lane1) else -3.0
+                    action = np.array([decel, 0.0], dtype=np.float32)
                     return action
             return np.array([action[0], 0.0], dtype=np.float32)
 
@@ -543,17 +559,28 @@ class MergingController:
             gap = leader[1]
             l_speed = traci.vehicle.getSpeed(leader[0])
             approach = max(ego_speed - l_speed, 0.0)
-            if gap < _stopping_dist(approach) + MIN_GAP:
+            
+            # Handle negative gaps (already overlapping or past leader) - EMERGENCY!
+            if gap < 0 or gap < 5.0:  # Very critical - less than 5m
+                cur_front_safe = False
+                if self._log_enabled and self._tick_count % 10 == 0:
+                    msg = f"  [EMERGENCY] Critical gap: {gap:.1f}m, leader_speed={l_speed:.1f}m/s\n"
+                    if hasattr(self, 'log_file') and self.log_file:
+                        self.log_file.write(msg)
+                        self.log_file.flush()
+            elif gap < _stopping_dist(approach) + MIN_GAP:
                 cur_front_safe = False
 
-        # ── Check TARGET lane (only if lane-changing) ──
+        # ── Check TARGET lane (only if lane-changing AND not already merged) ──
         lc_safe = True
-        if lc != 0 and target_lane != cur_lane:
+        target_lane_leader_speed = None  # Track target lane leader for pre-merge speed matching
+        # Skip target lane checks if already merged to lane 1 - prevents unnecessary braking
+        if lc != 0 and target_lane != cur_lane and not self._merged_to_lane1:
             target_lane_id = f'{edge_id}_{target_lane}'
             # Scan all vehicles for target lane neighbours
             ego_lanepos = traci.vehicle.getLanePosition(self.ego_id)
             front_gap, rear_gap = float('inf'), float('inf')
-            front_approach, rear_approach = 0.0, 0.0
+            front_speed, rear_speed = 0.0, 0.0
 
             for vid in traci.vehicle.getIDList():
                 if vid == self.ego_id:
@@ -572,47 +599,60 @@ class MergingController:
                     gap = longitudinal - VEH_LENGTH
                     if gap < front_gap:
                         front_gap = gap
-                        front_approach = max(ego_speed - v_speed, 0.0)
+                        front_speed = v_speed
+                        target_lane_leader_speed = v_speed  # Store for pre-merge speed matching
                 else:
                     gap = abs(longitudinal) - VEH_LENGTH
                     if gap < rear_gap:
                         rear_gap = gap
-                        rear_approach = max(v_speed - ego_speed, 0.0)
+                        rear_speed = v_speed
 
-            # Stricter check: require safe gaps AND similar speeds
+            # Calculate approach speeds
+            front_approach = max(ego_speed - front_speed, 0.0)
+            rear_approach = max(rear_speed - ego_speed, 0.0)
+            
+            # Check if gaps are safe using stopping distance formula
             front_safe_gap = _stopping_dist(front_approach) + MIN_GAP
             rear_safe_gap = _stopping_dist(rear_approach) + MIN_GAP
             
-            # Additional check: reject if speed difference is too large
-            max_speed_diff = 10.0  # m/s (36 km/h)
-            if (front_gap < front_safe_gap or rear_gap < rear_safe_gap or
-                    front_approach > max_speed_diff or rear_approach > max_speed_diff):
+            if front_gap < front_safe_gap or rear_gap < rear_safe_gap:
                 lc_safe = False
                 if self._log_enabled and self._tick_count % 20 == 0:
-                    msg = f"  [SAFETY] Lane change blocked: front_gap={front_gap:.1f}m rear_gap={rear_gap:.1f}m front_app={front_approach:.1f}m/s rear_app={rear_approach:.1f}m/s\n"
+                    msg = f"  [SAFETY] Lane change blocked: front_gap={front_gap:.1f}m (need {front_safe_gap:.1f}m) rear_gap={rear_gap:.1f}m (need {rear_safe_gap:.1f}m)\n"
                     if hasattr(self, 'log_file') and self.log_file:
                         self.log_file.write(msg)
                         self.log_file.flush()
 
-        # ── Urgent merge: force lane change if on a dead-end lane ─────
-        # Lane 0 on the merge edge has no connection to the next edge.
-        # If ego is running out of road, override safety to force merge.
+        # ── Urgent merge: force lane change if on merge edge after junction ─────
+        # As soon as vehicle exits clusterJ1_cluster111_J1 junction onto edge -1, 
+        # it needs to merge IMMEDIATELY with urgency, not wait until running out of space.
         urgent_merge = False
         if cur_lane == 0 and not edge_id.startswith(':'):
-            try:
-                lane_length = traci.lane.getLength(f'{edge_id}_0')
-                lane_pos = traci.vehicle.getLanePosition(self.ego_id)
-                remaining = lane_length - lane_pos
-                # Urgent if less than 100 m remaining on the dead-end lane (was 60m)
-                if remaining < 100.0:
-                    urgent_merge = True
-                    if self._log_enabled and self._tick_count % 10 == 0:
-                        msg = f"  [URGENT] Dead-end lane detected: {remaining:.1f}m remaining\n"
-                        if hasattr(self, 'log_file') and self.log_file:
-                            self.log_file.write(msg)
-                            self.log_file.flush()
-            except Exception:
-                pass
+            # Trigger urgent merge immediately on edge -1 (main merge edge after junction)
+            # This gives the vehicle a sense of urgency to merge right away
+            if edge_id == '-1':
+                urgent_merge = True
+                if self._log_enabled and self._tick_count % 10 == 0:
+                    msg = f"  [URGENT] On merge edge -1, must merge immediately!\n"
+                    if hasattr(self, 'log_file') and self.log_file:
+                        self.log_file.write(msg)
+                        self.log_file.flush()
+            else:
+                # For other edges, check remaining distance as before
+                try:
+                    lane_length = traci.lane.getLength(f'{edge_id}_0')
+                    lane_pos = traci.vehicle.getLanePosition(self.ego_id)
+                    remaining = lane_length - lane_pos
+                    # Urgent if less than 100 m remaining on the dead-end lane
+                    if remaining < 100.0:
+                        urgent_merge = True
+                        if self._log_enabled and self._tick_count % 10 == 0:
+                            msg = f"  [URGENT] Dead-end lane detected: {remaining:.1f}m remaining\n"
+                            if hasattr(self, 'log_file') and self.log_file:
+                                self.log_file.write(msg)
+                                self.log_file.flush()
+                except Exception:
+                    pass
 
         # ── Decide ──
         if urgent_merge:
@@ -643,13 +683,31 @@ class MergingController:
                 # Slow down to create a gap, keep trying
                 action = np.array([-3.0, 5.0], dtype=np.float32)
         elif lc != 0 and not lc_safe:
-            # Cancel lane change; brake if current lane is also unsafe
+            # Cancel lane change; use moderate braking if current lane is also unsafe
+            # PRE-MERGE SPEED MATCHING: Brake to match target lane leader speed
             action = np.array([action[0], 0.0], dtype=np.float32)
             if not cur_front_safe:
-                action[0] = -5.0
+                # Check if gap is critical (< 5m) or just unsafe
+                leader = traci.vehicle.getLeader(self.ego_id, 50.0)
+                if leader is not None and leader[0] and leader[1] < 5.0:
+                    action[0] = -5.0  # Hard braking for critical gap
+                else:
+                    action[0] = -3.0  # Moderate braking for unsafe gap
+            elif target_lane_leader_speed is not None and ego_speed > target_lane_leader_speed + 2.0:
+                # Slow down to match target lane traffic before merging
+                action[0] = -3.0
+                if self._log_enabled and self._tick_count % 10 == 0:
+                    msg = f"  [PRE-MERGE] Slowing to match target lane: ego={ego_speed:.1f} target_leader={target_lane_leader_speed:.1f}\n"
+                    if hasattr(self, 'log_file') and self.log_file:
+                        self.log_file.write(msg)
+                        self.log_file.flush()
         elif not cur_front_safe:
-            # Brake hard, keep lane-change intention if it was safe
-            action = np.array([-5.0, action[1]], dtype=np.float32)
+            # Use hard braking only if gap is critical, otherwise moderate
+            leader = traci.vehicle.getLeader(self.ego_id, 50.0)
+            if leader is not None and leader[0] and leader[1] < 5.0:
+                action = np.array([-5.0, action[1]], dtype=np.float32)
+            else:
+                action = np.array([-3.0, action[1]], dtype=np.float32)
 
         return action
 
@@ -657,102 +715,88 @@ class MergingController:
         """Send acceleration and lane-change commands to SUMO."""
         acc, lc = parsed_action
 
-        # Update lane change state
+        # Decrement cooldown timer
+        if self._lane_change_cooldown > 0:
+            self._lane_change_cooldown -= 1
+
+        # Track lane changes and detect merge completion
         try:
             cur_lane = traci.vehicle.getLaneIndex(self.ego_id)
-            if self._lane_change_in_progress:
-                if cur_lane == self._lane_change_target:
-                    # Lane change completed
-                    self._lane_change_in_progress = False
-                    self._lane_change_cooldown_ticks = 100  # 10 sec cooldown after completion
-                    if self._log_enabled:
-                        msg = f"  [LC COMPLETE] Reached target lane {cur_lane}\n"
-                        if hasattr(self, 'log_file') and self.log_file:
-                            self.log_file.write(msg)
-                            self.log_file.flush()
-        except Exception:
-            pass
-
-        # Decrement cooldown
-        if self._lane_change_cooldown_ticks > 0:
-            self._lane_change_cooldown_ticks -= 1
-
-        if lc != 0:
-            try:
-                cur_lane = traci.vehicle.getLaneIndex(self.ego_id)
-                edge_id = traci.vehicle.getRoadID(self.ego_id)
-                if edge_id.startswith(':'):
-                    # On a junction internal edge — skip lane changes
-                    pass
-                else:
-                    # Block if lane change in progress OR cooldown active
-                    # UNLESS urgent merge is needed (checked in _safety_check)
-                    if self._lane_change_in_progress:
-                        if self._log_enabled:
-                            msg = f"  [SKIP] Lane change in progress to lane {self._lane_change_target}\n"
-                            if hasattr(self, 'log_file') and self.log_file:
-                                self.log_file.write(msg)
-                                self.log_file.flush()
-                        return
-                    
-                    if self._lane_change_cooldown_ticks > 0:
-                        # Check if urgent merge needed - if so, override cooldown
-                        urgent_check = False
-                        if cur_lane == 0:
-                            try:
-                                lane_length = traci.lane.getLength(f'{edge_id}_0')
-                                lane_pos = traci.vehicle.getLanePosition(self.ego_id)
-                                remaining = lane_length - lane_pos
-                                if remaining < 100.0:
-                                    urgent_check = True
-                                    if self._log_enabled:
-                                        msg = f"  [URGENT OVERRIDE] Cooldown bypassed, {remaining:.1f}m remaining\n"
-                                        if hasattr(self, 'log_file') and self.log_file:
-                                            self.log_file.write(msg)
-                                            self.log_file.flush()
-                            except Exception:
-                                pass
-                        
-                        if not urgent_check:
-                            if self._log_enabled:
-                                msg = f"  [SKIP] Cooldown active ({self._lane_change_cooldown_ticks} ticks remaining)\n"
-                                if hasattr(self, 'log_file') and self.log_file:
-                                    self.log_file.write(msg)
-                                    self.log_file.flush()
-                            return
-                    
-                    num_lanes = traci.edge.getLaneNumber(edge_id)
-                    target = cur_lane + int(lc)
-                    target = max(0, min(target, num_lanes - 1))
-                    if target != cur_lane:
-                        # Use setLaneChangeMode to allow lateral movement
-                        traci.vehicle.setLaneChangeMode(self.ego_id, 1621)
-                        
-                        # Set lateral speed for smooth lane change (1.0 m/s lateral drift)
-                        # This creates gradual lane changes instead of instant snapping
-                        lateral_speed = 1.0  # m/s - adjust for smoother/faster changes
-                        traci.vehicle.setLateralSpeed(self.ego_id, lateral_speed)
-                        
-                        lane_diff = target - cur_lane
-                        traci.vehicle.changeLaneRelative(self.ego_id, lane_diff, 3.0)
-                        self._lane_change_in_progress = True
-                        self._lane_change_target = target
-                        if self._log_enabled:
-                            msg = f"  [LC START] Requesting lane change: {cur_lane} -> {target} (lateral_speed={lateral_speed}m/s)\n"
-                            if hasattr(self, 'log_file') and self.log_file:
-                                self.log_file.write(msg)
-                                self.log_file.flush()
-            except Exception as e:
+            if cur_lane == 1 and not self._merged_to_lane1:
+                self._merged_to_lane1 = True
                 if self._log_enabled:
-                    msg = f"  [ERROR] Lane change failed: {e}\n"
+                    msg = "  [MERGE COMPLETE] Vehicle reached lane 1, blocking further lane changes\n"
                     if hasattr(self, 'log_file') and self.log_file:
                         self.log_file.write(msg)
                         self.log_file.flush()
+            
+            # Detect lane change completion and reset cooldown
+            if cur_lane != self._last_lane:
+                self._lane_change_cooldown = 30  # 3 seconds at 0.1s time step
+                self._last_lane = cur_lane
+        except Exception:
+            pass
 
-        # Acceleration
+        if lc != 0:
+            # Check cooldown first
+            if self._lane_change_cooldown > 0:
+                if self._log_enabled:
+                    msg = f"  [COOLDOWN] Lane change blocked, {self._lane_change_cooldown} ticks remaining\n"
+                    if hasattr(self, 'log_file') and self.log_file:
+                        self.log_file.write(msg)
+                        self.log_file.flush()
+            else:
+                # Use changeLane() instead of changeLaneRelative()
+                # changeLane(vehID, laneIndex, duration) performs GRADUAL lane change over duration
+                try:
+                    cur_lane = traci.vehicle.getLaneIndex(self.ego_id)
+                    edge_id = traci.vehicle.getRoadID(self.ego_id)
+                    
+                    # Once merged to lane 1, block changes back to lane 0
+                    if self._merged_to_lane1 and lc < 0:
+                        if self._log_enabled:
+                            msg = f"  [MERGE LOCK] Lane change to right blocked - already merged to lane 1\n"
+                            if hasattr(self, 'log_file') and self.log_file:
+                                self.log_file.write(msg)
+                                self.log_file.flush()
+                    else:
+                        num_lanes = traci.edge.getLaneNumber(edge_id)
+                        target_lane = cur_lane + int(lc)
+                        target_lane = max(0, min(target_lane, num_lanes - 1))
+                        
+                        if target_lane != cur_lane:
+                            # changeLane() with duration creates smooth lane change over time
+                            # Reduced duration for more responsive merging (was 5.0s)
+                            duration = 3.0
+                            traci.vehicle.changeLane(self.ego_id, target_lane, duration)
+                            if self._log_enabled:
+                                msg = f"  [LC START] changeLane: {cur_lane} -> {target_lane} over {duration}s, edge={edge_id}\n"
+                                if hasattr(self, 'log_file') and self.log_file:
+                                    self.log_file.write(msg)
+                                    self.log_file.flush()
+                except Exception as e:
+                    if self._log_enabled:
+                        msg = f"  [ERROR] Lane change failed: {e}\n"
+                        if hasattr(self, 'log_file') and self.log_file:
+                            self.log_file.write(msg)
+                            self.log_file.flush()
+
+        # Acceleration - apply AFTER lane change to ensure proper sequencing
         try:
             traci.vehicle.setAcceleration(self.ego_id, acc, 1)
-            if traci.vehicle.getSpeed(self.ego_id) > 32:
-                traci.vehicle.setSpeed(self.ego_id, 32)
+            # Cap speed at 28 m/s (100 km/h) for safer merging - reduced from 32 m/s
+            current_speed = traci.vehicle.getSpeed(self.ego_id)
+            if current_speed > 28:
+                traci.vehicle.setSpeed(self.ego_id, 28)
+            # Additional safety: if accelerating but leader is close, cap speed to leader's speed
+            if acc > 0:
+                leader = traci.vehicle.getLeader(self.ego_id, 50.0)
+                if leader is not None and leader[0]:
+                    gap = leader[1]
+                    if gap < 30.0:  # Close following - increased from 20m
+                        leader_speed = traci.vehicle.getSpeed(leader[0])
+                        # Cap at leader speed minus safety margin
+                        if current_speed > leader_speed:
+                            traci.vehicle.setSpeed(self.ego_id, max(leader_speed - 2.0, 0))
         except Exception:
             pass

@@ -5,6 +5,7 @@ __pycache__/
 # FHWM Co-Simulation outputs
 performance_metrics.csv
 evaluation_outputs/
+merging_log.txt
 
 # Large model/asset files
 yolov5m.pt

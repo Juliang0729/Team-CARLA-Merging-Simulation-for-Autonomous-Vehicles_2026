@@ -1,0 +1,92 @@
+description: |-
+  US101 highway co-simulation scenario.
+  SUMO is the master: all vehicle spawning and motion (including the ego) are controlled by SUMO.
+  CARLA acts purely as a 3D visualizer for the SUMO traffic.
+  No CARLA-controlled vehicles are created.
+
+world:
+  sync_mode: true
+  client_port: 2000
+  fixed_delta_seconds: 0.05
+  seed: 11
+
+vehicle_base:
+  sensing:
+    perception:
+      activate: false
+      camera:
+        visualize: 0
+        num: 1
+        positions:
+          - [2.5, 0, 2.0, 0]  # front camera
+      lidar:
+        visualize: false
+        channels: 32
+        range: 50
+        points_per_second: 100000
+        rotation_frequency: 20
+        upper_fov: 10.0
+        lower_fov: -30.0
+        dropoff_general_rate: 0.0
+        dropoff_intensity_limit: 1.0
+        dropoff_zero_intensity: 0.0
+        noise_stddev: 0.0
+    localization:
+      activate: false
+      gnss:
+        noise_alt_stddev: 0.0
+        noise_lat_stddev: 0.0
+        noise_lon_stddev: 0.0
+        heading_direction_stddev: 0.0
+        speed_stddev: 0.0
+  map_manager:
+    visualize: false
+    activate: false
+
+sumo:
+  port: ~
+  host: ~
+  gui: true
+  client_order: 1
+  step_length: ${world.fixed_delta_seconds}
+
+merging_controller:
+  ego_id: 'ego'
+  model_path: '~/OpenCDA/onRampMerging/models/GRU-uniform-delay/GRU-uniform-delay_best.zip'
+  radius: 50
+  max_delay: 20
+  delay_mode: 'uniform'
+  use_safety: true
+  merge_edge: '-1'
+  merge_min_lane: 1
+
+birdseye_camera:
+  camera:
+    height: 600
+    width: 800
+    fov: 90
+  visualizer:
+    window_name: 'US101 Birdseye View'
+    fps: 20
+
+state_estimator:
+  camera:
+    height: 720
+    width: 1280
+    fov: 90
+  yolo:
+    model: 'yolov5m.pt'  # Will use yolov5m.pt from OpenCDA root
+    conf: 0.5
+    iou: 0.7
+  visualizer:
+    window_name: 'US101 State Estimation'
+    show_detections: true
+    show_tracks: true
+
+evaluation:
+  output_dir: './evaluation_outputs/us101'
+  log_interval: 10
+  metrics:
+    - 'simulator_time_offset'
+    - 'position_error'
+    - 'velocity_error'

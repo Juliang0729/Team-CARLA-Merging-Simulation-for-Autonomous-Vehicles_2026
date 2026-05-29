@@ -15,11 +15,15 @@ Features:
 import numpy as np
 import cv2
 import carla
-from ultralytics import YOLO
+import torch
 import threading
 import time
+import warnings
 from collections import defaultdict
 from opencda.co_simulation.sumo_integration.bridge_helper import BridgeHelper
+
+# Suppress all FutureWarnings (YOLOv5 torch.cuda.amp deprecation warnings)
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 # Configuration constants
 CAMERA_W = 640
@@ -121,10 +125,14 @@ class StateEstimator:
         self.display_width = CAMERA_W
         self.display_height = CAMERA_H
         
-        # YOLO model
+        # YOLO model (using torch.hub for YOLOv5 compatibility)
         if yolo_model_path:
             try:
-                self.yolo_model = YOLO(yolo_model_path)
+                # Use torch.hub.load for YOLOv5 models
+                self.yolo_model = torch.hub.load('ultralytics/yolov5', 'custom', 
+                                                 path=yolo_model_path, force_reload=False)
+                self.yolo_model.conf = 0.5  # Confidence threshold
+                self.yolo_model.iou = 0.45  # NMS IoU threshold
                 print(f"[StateEstimator] Loaded YOLO model from {yolo_model_path}")
             except Exception as e:
                 print(f"[StateEstimator] Failed to load YOLO model: {e}")
@@ -286,39 +294,42 @@ class StateEstimator:
         if self.yolo_model is not None:
             for cam_name, frame in camera_frames.items():
                 try:
-                    results = self.yolo_model(frame, verbose=False)
-                    for result in results:
-                        boxes = result.boxes
-                        for box in boxes:
-                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                            conf = box.conf[0].cpu().numpy()
-                            cls = int(box.cls[0].cpu().numpy())
+                    # YOLOv5 torch.hub inference
+                    results = self.yolo_model(frame)
+                    
+                    # Parse results (torch.hub YOLOv5 format)
+                    # results.xyxy[0] contains [x1, y1, x2, y2, conf, class]
+                    detections = results.xyxy[0].cpu().numpy()
+                    
+                    for det in detections:
+                        x1, y1, x2, y2, conf, cls = det
+                        cls = int(cls)
+                        
+                        # Only track high-confidence vehicle detections (class 2 = car)
+                        if cls == 2 and conf > 0.5:
+                            center_x = (x1 + x2) / 2
+                            center_y = (y1 + y2) / 2
                             
-                            # Only track high-confidence vehicle detections (class 2 = car)
-                            if cls == 2 and conf > 0.5:
-                                center_x = (x1 + x2) / 2
-                                center_y = (y1 + y2) / 2
-                                
-                                detection_idx = len(self.detected_positions)
-                                self.detected_positions.append({
-                                    'bbox': (x1, y1, x2, y2),
-                                    'center': (center_x, center_y),
-                                    'conf': float(conf),
-                                    'class': cls,
-                                    'camera': cam_name,
-                                    'index': detection_idx
-                                })
-                            
-                            # Draw detection on frame
-                            cv2.rectangle(frame, 
-                                        (int(x1), int(y1)), 
-                                        (int(x2), int(y2)), 
-                                        (0, 255, 0), 2)
-                            cv2.putText(frame, f'{conf:.2f}', 
-                                      (int(x1), int(y1) - 5),
-                                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, 
-                                      (0, 255, 0), 1)
-                except Exception:
+                            detection_idx = len(self.detected_positions)
+                            self.detected_positions.append({
+                                'bbox': (x1, y1, x2, y2),
+                                'center': (center_x, center_y),
+                                'conf': float(conf),
+                                'class': cls,
+                                'camera': cam_name,
+                                'index': detection_idx
+                            })
+                        
+                        # Draw detection on frame
+                        cv2.rectangle(frame, 
+                                    (int(x1), int(y1)), 
+                                    (int(x2), int(y2)), 
+                                    (0, 255, 0), 2)
+                        cv2.putText(frame, f'{conf:.2f}', 
+                                  (int(x1), int(y1) - 5),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, 
+                                  (0, 255, 0), 1)
+                except Exception as e:
                     pass  # Silent fail if detection fails
         
         # Redraw tracked vehicles with BLUE boxes to distinguish them
