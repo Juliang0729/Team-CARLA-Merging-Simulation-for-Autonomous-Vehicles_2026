@@ -44,4 +44,30 @@ Two custom maps are supported by the co-simulation:
 | **FHWM** | A lightweight, legacy version of **US101** modeled after the U.S. 101 highway interchange with Lankershim Blvd. in Los Angeles, California. Available for both Linux and Windows systems. |
 | **US101** | Updated version of **FHWM** complete with additional surrounding buildings and bug-fixes to road markings. Compiled into a Linux-only packaged CARLA build. |
 
+---
+
 ## Architecture
+
+The figure below depicts a basic overview of the co-simulation architecture.
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/d4d4b7fe-19b6-4416-b492-5fb1e239a8b7" width="65%" />
+</p>
+<p align="center"><em>Figure 1: CARLA-SUMO Co-Simulation Architecture.</em></p>
+
+A key aspect of the co-simulation bridge is that all vehicle commands are handled between SUMO and the merging controller. CARLA acts simply as a visualizer, never influencing the behavior of actors within SUMO. This distinction is crucial in ensuring 2D vehicle states from SUMO are properly depicted in CARLA's 3D space.
+
+---
+
+## Prerequisites
+
+| Requirement | Version | Notes |
+|:---:|:---:|:---:|
+| **OS** | Ubuntu 20.04 / 22.04 | Linux only for co-simulation |
+| **Python** | 3.7.10 | Via Conda (see below) |
+| **CARLA** | 0.9.16 | See installation steps |
+| **SUMO** | ≥ 1.18 | `sudo apt install sumo sumo-tools` |
+| **Conda** | Any recent version | Miniconda or Anaconda |
+| **GPU** | XXX | For CARLA rendering and YOLO state estimation |
+
+> **Windows note:** The FHWM map assets can be installed on Windows for standalone CARLA use, but the full OpenCDA co-simulation pipeline is Linux-only.
