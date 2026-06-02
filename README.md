@@ -68,8 +68,8 @@ A key aspect of the co-simulation bridge is that all vehicle commands are handle
 | **CARLA** | 0.9.16 | See installation steps |
 | **SUMO** | ≥ 1.18 | `sudo add-apt-repository ppa:sumo/stable`<br>`sudo apt-get update`<br>`sudo apt-get install sumo sumo-tools sumo-doc` |
 | **Conda** | Any recent version | Miniconda or Anaconda |
-| **GPU** | XXX | ≥ 8 GB VRAM |
-| **Disk Space** | XXX | ≥ 40 GB of space for CARLA, SUMO, OpenCDA, Maps, Python Packages | 
+| **GPU** | Recommended | ≥ 8 GB VRAM |
+| **Disk Space** | ≥ 40 GB | ≥ 40 GB of space for CARLA, SUMO, OpenCDA, Maps, Python Packages | 
 
 > **Windows note:** The FHWM map assets can be extracted directly to `$CARLA_HOME` on Windows systems for standalone use (see [Final Highway Model (FHWM)](#final-highway-model-fhwm)).
 
@@ -123,9 +123,13 @@ conda activate opencda
 pip install -r requirements.txt
 ```
 
-Install SUMO dependencies:
+Install SUMO:
 ```bash
+sudo add-apt-repository ppa:sumo/stable
+sudo apt-get update
+sudo apt-get install sumo sumo-tools sumo-doc
 export SUMO_HOME=/usr/share/sumo
+echo 'export SUMO_HOME=/usr/share/sumo' >> ~/.bashrc
 ```
 
 Additional packages required for state estimation and DAROM submodule:
@@ -148,7 +152,7 @@ source ~/OpenCDA/setup.sh
 
 - For CARLA built from source only:
   ```bash
-  pip install $CARLA_HOME/Dist/{YOUR_CARLA_DIST_HERE}/LinuxNoEditor/PythonAPI/carla/dist/carla-0.9.16-cp313-cp313-linux_x86_64.whl
+  pip install $CARLA_HOME/Dist/CARLA_Shipping_4ca87e818/LinuxNoEditor/PythonAPI/carla/dist/carla-0.9.16-cp310-cp310-linux_x86_64.whl
   ```
 ### 5. Install OpenCDA
 
@@ -225,7 +229,7 @@ A convenient shell script handles starting CARLA and launching the OpenCDA co-si
 
 ```bash
 cd ~/OpenCDA
-./run_us101_cosim.sh
+bash run_us101_cosim.sh
 ```
 
 This will:
@@ -256,7 +260,7 @@ python opencda.py -t single_fhwm_cosim --apply_ml
 Example — run with full evaluation pipeline:
 
 ```bash
-./run_us101_cosim.sh --evaluation
+bash run_us101_cosim.sh --evaluation
 ```
 
 ---
@@ -280,8 +284,6 @@ When `--evaluation` is passed, `PerformanceEvaluator` logs the following metrics
 | Position error | YOLO detection error vs. SUMO ground truth (m) |
 | Drift rate | Rate of position error change (m/s) |
 | Collision events | Ego collision count |
-
----
 
 ---
 
