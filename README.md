@@ -68,7 +68,7 @@ A key aspect of the co-simulation bridge is that all vehicle commands are handle
 | **CARLA** | 0.9.16 | See installation steps |
 | **SUMO** | ≥ 1.18 | `sudo add-apt-repository ppa:sumo/stable`<br>`sudo apt-get update`<br>`sudo apt-get install sumo sumo-tools sumo-doc` |
 | **Conda** | Any recent version | Miniconda or Anaconda |
-| **GPU** | Recommended | ≥ 8 GB VRAM |
+| **GPU** | Recommended | ≥ 8 GB VRAM, NVIDIA Driver ≥ 575 (CUDA 13.0) |
 | **Disk Space** | ≥ 40 GB | ≥ 40 GB of space for CARLA, SUMO, OpenCDA, Maps, Python Packages | 
 
 > **Windows note:** The FHWM map assets can be extracted directly to `$CARLA_HOME` on Windows systems for standalone use (see [Final Highway Model (FHWM)](#final-highway-model-fhwm)).

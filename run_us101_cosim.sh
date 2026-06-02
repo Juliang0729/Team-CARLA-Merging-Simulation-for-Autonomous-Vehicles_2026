@@ -11,9 +11,9 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-CARLA_DIR="/home/julian/carla/Unreal/CarlaUE4/Saved/StagedBuilds/LinuxNoEditor"
+CARLA_DIR="$HOME/carla/Unreal/CarlaUE4/Saved/StagedBuilds/LinuxNoEditor"
 CARLA_EXEC="./CarlaUE4.sh"
-OPENCDA_DIR="/home/julian/OpenCDA"
+OPENCDA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CARLA_PID=""
 APPLY_ML=""
 

@@ -52,7 +52,6 @@ sumo:
 
 merging_controller:
   ego_id: 'ego'
-  model_path: '~/OpenCDA/onRampMerging/models/GRU-uniform-delay/GRU-uniform-delay_best.zip'
   radius: 50
   max_delay: 20
   delay_mode: 'uniform'
