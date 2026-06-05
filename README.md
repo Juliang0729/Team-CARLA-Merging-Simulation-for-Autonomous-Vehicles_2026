@@ -5,6 +5,11 @@ September 2025 and May 2026.
 
 The project was adapted from the work of GWU PhD candidate Amin Tabrizian's study: [Reinforcement Learning with Latent State Inference for Autonomous On-ramp Merging under Observation Delay](https://bpb-us-w2.wpmucdn.com/web.seas.gwu.edu/dist/9/15/files/2024/03/highway-merging-amin-9c2588ffcc670827.pdf) (co-authors: Zhitong Huang, Peng Wei). The merging controller logic is also sourced from Amin's [DAROM: Delay-Aware Reinforcement Learning for Highway On Ramp Merging](https://github.com/amin-tabrizian/onRampMerging) included here as a Git submodule.
 
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/6676c9cb-c2d5-4bd0-ad38-ddfe1e06ca5b" width="75%" />
+</p>
+<p align="center"><em>Figure 1: CARLA-SUMO Co-Simulation. </em></p>
+
 ---
 
 ## Table of Contents
@@ -53,7 +58,7 @@ The figure below depicts a basic overview of the co-simulation architecture.
 <p align="center">
   <img src="https://github.com/user-attachments/assets/d4d4b7fe-19b6-4416-b492-5fb1e239a8b7" width="65%" />
 </p>
-<p align="center"><em>Figure 1: CARLA-SUMO Co-Simulation Architecture.</em></p>
+<p align="center"><em>Figure 2: CARLA-SUMO Co-Simulation Architecture.</em></p>
 
 A key aspect of the co-simulation bridge is that all vehicle commands are handled between SUMO and the merging controller. CARLA acts simply as a visualizer, never influencing the behavior of actors within SUMO. This distinction is crucial in ensuring 2D vehicle states from SUMO are properly reflected in CARLA's 3D space.
 
