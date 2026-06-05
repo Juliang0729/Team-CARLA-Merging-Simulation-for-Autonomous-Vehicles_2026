@@ -66,7 +66,7 @@ A key aspect of the co-simulation bridge is that all vehicle commands are handle
 | **OS** | Ubuntu 20.04 / 22.04 | OpenCDA Co-simulation is exlusive to Linux systems |
 | **Python** | 3.10.xx | Via Conda (see below) |
 | **CARLA** | 0.9.16 | See installation steps |
-| **SUMO** | ≥ 1.18 | `sudo add-apt-repository ppa:sumo/stable`<br>`sudo apt-get update`<br>`sudo apt-get install sumo sumo-tools sumo-doc` |
+| **SUMO** | ≥ 1.18 | See installation steps |
 | **Conda** | Any recent version | Miniconda or Anaconda |
 | **GPU** | Recommended | ≥ 8 GB VRAM, NVIDIA Driver ≥ 575 (CUDA 13.0) |
 | **Disk Space** | ≥ 40 GB | ≥ 40 GB of space for CARLA, SUMO, OpenCDA, Maps, Python Packages | 
@@ -199,13 +199,13 @@ The US101 map is compiled into a dedicated Linux-only CARLA build. It cannot be 
 
 ```bash
 wget https://huggingface.co/datasets/Jgross29/US101_Map/resolve/main/LinuxNoEditor.tar.xz
-tar -xJf LinuxNoEditor.tar.xz -C ~/carla/Unreal/CarlaUE4/Saved/StagedBuilds/
+tar -xJf LinuxNoEditor.tar.xz -C ~/carla/Dist/US101/
 ```
 
 Once extracted, the directory structure should match:
 
 ```
-~/carla/Unreal/CarlaUE4/Saved/StagedBuilds/LinuxNoEditor/
+~/carla/Dist/US101/LinuxNoEditor/
 ├── CarlaUE4.sh
 ├── Manifest_NonUFSFiles_Linux.txt
 ├── Engine/
